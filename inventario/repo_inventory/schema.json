@@ -1,0 +1,223 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://b3sa.example/schemas/repository-technology-inventory-1.0.0.json",
+  "title": "Repository technology inventory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_at",
+    "generator",
+    "scan",
+    "summary",
+    "repositories",
+    "errors"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "generator": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "scan": { "type": "object" },
+    "summary": {
+      "type": "object",
+      "required": ["repository_count", "technology_counts", "runtime_os_counts", "repositories_with_warnings"],
+      "properties": {
+        "repository_count": { "type": "integer", "minimum": 0 },
+        "technology_counts": { "$ref": "#/$defs/countMap" },
+        "runtime_os_counts": { "$ref": "#/$defs/countMap" },
+        "repositories_with_warnings": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "repositories": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/repository" }
+    },
+    "errors": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/message" }
+    }
+  },
+  "$defs": {
+    "nullableString": { "type": ["string", "null"] },
+    "countMap": {
+      "type": "object",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
+    "message": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" },
+        "repository": { "type": "string" },
+        "path": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "object",
+      "required": ["path", "selector"],
+      "properties": {
+        "path": { "type": "string" },
+        "selector": { "type": "string" },
+        "detail": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "version": {
+      "type": "object",
+      "required": ["value", "kind", "confidence", "source"],
+      "properties": {
+        "value": { "type": "string" },
+        "kind": { "type": "string" },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "normalized": { "type": "string" },
+        "source": { "$ref": "#/$defs/source" }
+      },
+      "additionalProperties": false
+    },
+    "buildFile": {
+      "type": "object",
+      "required": ["path", "type", "role", "primary"],
+      "properties": {
+        "path": { "type": "string" },
+        "type": { "type": "string" },
+        "role": { "type": "string" },
+        "primary": { "type": "boolean" },
+        "technology": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "buildTool": {
+      "type": "object",
+      "required": ["name", "confidence", "source"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "source": { "$ref": "#/$defs/source" }
+      },
+      "additionalProperties": false
+    },
+    "framework": {
+      "type": "object",
+      "required": ["name", "source"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": "string" },
+        "source": { "$ref": "#/$defs/source" }
+      },
+      "additionalProperties": false
+    },
+    "confidence": { "enum": ["low", "medium", "high"] },
+    "runtimeEvidence": {
+      "type": "object",
+      "required": ["os", "confidence", "path", "rule", "detail", "applies_to"],
+      "properties": {
+        "os": { "enum": ["linux", "windows"] },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "path": { "$ref": "#/$defs/nullableString" },
+        "rule": { "type": "string" },
+        "detail": { "type": "string" },
+        "applies_to": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "runtime": {
+      "type": "object",
+      "required": ["classification", "confidence", "evidence"],
+      "properties": {
+        "classification": { "enum": ["linux", "windows", "mixed", "unknown"] },
+        "confidence": { "$ref": "#/$defs/confidence" },
+        "candidates": {
+          "type": "array",
+          "items": { "enum": ["linux", "windows"] },
+          "uniqueItems": true
+        },
+        "scope": { "type": "string" },
+        "note": { "type": "string" },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/runtimeEvidence" } }
+      },
+      "additionalProperties": false
+    },
+    "technology": {
+      "type": "object",
+      "required": ["id", "display_name", "versions", "build_files", "build_tools", "frameworks", "evidence", "runtime", "warnings"],
+      "properties": {
+        "id": { "enum": ["java", "nodejs", "dotnet", "csharp", "sql", "tsql"] },
+        "display_name": { "type": "string" },
+        "versions": { "type": "array", "items": { "$ref": "#/$defs/version" } },
+        "build_files": { "type": "array", "items": { "$ref": "#/$defs/buildFile" } },
+        "build_tools": { "type": "array", "items": { "$ref": "#/$defs/buildTool" } },
+        "frameworks": { "type": "array", "items": { "$ref": "#/$defs/framework" } },
+        "evidence": { "type": "array", "items": { "type": "object" } },
+        "runtime": { "$ref": "#/$defs/runtime" },
+        "warnings": { "type": "array", "items": { "$ref": "#/$defs/message" } }
+      },
+      "additionalProperties": false
+    },
+    "repository": {
+      "type": "object",
+      "required": [
+        "name", "full_name", "url", "default_branch", "commit", "archived", "visibility",
+        "github_languages", "technologies", "primary_build_files", "deployment", "warnings", "scan_stats"
+      ],
+      "properties": {
+        "name": { "type": "string" },
+        "full_name": { "$ref": "#/$defs/nullableString" },
+        "url": { "$ref": "#/$defs/nullableString" },
+        "default_branch": { "$ref": "#/$defs/nullableString" },
+        "commit": { "$ref": "#/$defs/nullableString" },
+        "archived": { "type": ["boolean", "null"] },
+        "visibility": { "type": ["string", "null"] },
+        "github_languages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "bytes", "percentage"],
+            "properties": {
+              "name": { "type": "string" },
+              "bytes": { "type": "integer", "minimum": 0 },
+              "percentage": { "type": "number", "minimum": 0, "maximum": 100 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "technologies": { "type": "array", "items": { "$ref": "#/$defs/technology" } },
+        "primary_build_files": { "type": "array", "items": { "$ref": "#/$defs/buildFile" } },
+        "deployment": {
+          "type": "object",
+          "required": ["runtime_os", "confidence", "evidence", "note"],
+          "properties": {
+            "runtime_os": { "enum": ["linux", "windows", "mixed", "unknown"] },
+            "confidence": { "$ref": "#/$defs/confidence" },
+            "evidence": { "type": "array", "items": { "$ref": "#/$defs/runtimeEvidence" } },
+            "note": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        "warnings": { "type": "array", "items": { "$ref": "#/$defs/message" } },
+        "scan_stats": {
+          "type": "object",
+          "required": ["files_considered", "ignored_directories", "file_limit_reached"],
+          "properties": {
+            "files_considered": { "type": "integer", "minimum": 0 },
+            "ignored_directories": { "type": "integer", "minimum": 0 },
+            "file_limit_reached": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

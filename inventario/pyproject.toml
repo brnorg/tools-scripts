@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "b3sa-repo-inventory"
+version = "0.1.0"
+description = "Inventario estruturado de tecnologias, builds e runtime de repositorios"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+github-app = ["PyJWT[crypto]>=2.8,<3"]
+dev = ["jsonschema>=4.21,<5"]
+
+[project.scripts]
+repo-inventory = "repo_inventory.cli:main"
+
+[tool.setuptools.package-data]
+repo_inventory = ["schema.json"]
+

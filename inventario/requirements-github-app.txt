@@ -1,0 +1,3 @@
+# Necessario apenas para autenticar com GitHub App.
+PyJWT[crypto]>=2.8,<3
+
