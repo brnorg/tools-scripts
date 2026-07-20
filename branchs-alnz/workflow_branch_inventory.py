@@ -21,11 +21,15 @@ from urllib.parse import quote
 
 import jwt
 import requests
+import urllib3
 import yaml
 
 LOG = logging.getLogger("workflow-branches")
 API_VERSION = "2022-11-28"
 BRANCH_EVENTS = ("push", "pull_request", "pull_request_target", "workflow_run")
+
+# Requisito deste coletor: aceitar certificados internos, expirados ou self-signed.
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class WorkflowLoader(yaml.SafeLoader):
@@ -168,9 +172,9 @@ class State:
 
 
 class GitHubAppClient:
-    def __init__(self, app_id: str, installation_id: str, private_key: str,
+    def __init__(self, jwt_issuer: str, installation_id: str | None, private_key: str,
                  api_url: str, timeout: int, max_retries: int):
-        self.app_id = app_id
+        self.jwt_issuer = jwt_issuer
         self.installation_id = installation_id
         self.private_key = private_key
         self.api_url = api_url.rstrip("/")
@@ -186,6 +190,8 @@ class GitHubAppClient:
         session = getattr(self.local, "session", None)
         if session is None:
             session = requests.Session()
+            # Deliberadamente desabilitado para ambientes corporativos com CA interna.
+            session.verify = False
             session.headers.update({
                 "Accept": "application/vnd.github+json",
                 "X-GitHub-Api-Version": API_VERSION,
@@ -197,8 +203,60 @@ class GitHubAppClient:
     def _app_jwt(self) -> str:
         now = datetime.now(timezone.utc)
         payload = {"iat": int((now - timedelta(seconds=60)).timestamp()),
-                   "exp": int((now + timedelta(minutes=9)).timestamp()), "iss": self.app_id}
+                   "exp": int((now + timedelta(minutes=9)).timestamp()), "iss": self.jwt_issuer}
         return jwt.encode(payload, self.private_key, algorithm="RS256")
+
+    @staticmethod
+    def _raise_api_error(response: requests.Response, operation: str) -> None:
+        if response.ok:
+            return
+        try:
+            body = json.dumps(response.json(), ensure_ascii=False)
+        except ValueError:
+            body = response.text
+        body = body.replace("\r", " ").replace("\n", " ")[:2000]
+        raise RuntimeError(
+            f"{operation} falhou: HTTP {response.status_code} em {response.url}; resposta: {body}"
+        )
+
+    def _jwt_get(self, path: str, operation: str) -> dict[str, Any]:
+        url = f"{self.api_url}{path}"
+        response = requests.get(
+            url,
+            headers={
+                "Authorization": f"Bearer {self._app_jwt()}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": API_VERSION,
+                "User-Agent": "workflow-branch-inventory/1.0",
+            },
+            timeout=self.timeout,
+            verify=False,
+        )
+        self._raise_api_error(response, operation)
+        return response.json()
+
+    def validate_and_resolve_installation(self, org: str) -> None:
+        """Validate App credentials and obtain the installation ID from the org."""
+        app = self._jwt_get("/app", "Validação do GitHub App (GET /app)")
+        installation = self._jwt_get(
+            f"/orgs/{qpath(org)}/installation",
+            "Descoberta da instalação (GET /orgs/{org}/installation)",
+        )
+        discovered_id = str(installation["id"])
+        if self.installation_id and str(self.installation_id) != discovered_id:
+            LOG.warning(
+                "Installation ID informado (%s) difere do ID da organização (%s); usando %s",
+                self.installation_id, discovered_id, discovered_id,
+            )
+        self.installation_id = discovered_id
+        LOG.info(
+            "GitHub App validado: app=%s, instalação=%s, API=%s",
+            app.get("slug") or app.get("name") or app.get("id"), discovered_id, self.api_url,
+        )
+        self._refresh_token(force=True)
+        # Valida também a rota que será usada na paginação, com custo de uma chamada.
+        self.get_json("/installation/repositories", params={"per_page": 1, "page": 1})
+        LOG.info("Endpoints de autenticação e repositórios validados com sucesso")
 
     def _refresh_token(self, force: bool = False) -> None:
         with self.token_lock:
@@ -207,8 +265,11 @@ class GitHubAppClient:
             url = f"{self.api_url}/app/installations/{self.installation_id}/access_tokens"
             headers = {"Authorization": f"Bearer {self._app_jwt()}",
                        "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": API_VERSION}
-            response = requests.post(url, headers=headers, timeout=self.timeout)
-            response.raise_for_status()
+            response = requests.post(url, headers=headers, timeout=self.timeout, verify=False)
+            self._raise_api_error(
+                response,
+                "Criação do installation token (POST /app/installations/{id}/access_tokens)",
+            )
             data = response.json()
             self.token = data["token"]
             self.token_expires = datetime.fromisoformat(data["expires_at"].replace("Z", "+00:00"))
@@ -249,17 +310,17 @@ class GitHubAppClient:
                 else:
                     delay = min(120, 2 ** min(attempt + 2, 7)) + random.random() * 3
                 if attempt == self.max_retries:
-                    response.raise_for_status()
+                    self._raise_api_error(response, f"Requisição {method}")
                 with self.rate_lock:
                     LOG.warning("Limite da API/abuso detectado; aguardando %.1fs", delay)
                     time.sleep(delay)
                 continue
             if response.status_code >= 500:
                 if attempt == self.max_retries:
-                    response.raise_for_status()
+                    self._raise_api_error(response, f"Requisição {method}")
                 time.sleep(min(60, 2 ** attempt) + random.random())
                 continue
-            response.raise_for_status()
+            self._raise_api_error(response, f"Requisição {method}")
             return response
         raise RuntimeError("Número máximo de tentativas excedido")
 
@@ -384,6 +445,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Inventaria filtros de branches em GitHub Actions workflows")
     parser.add_argument("--org", default=os.getenv("GITHUB_ORG"))
     parser.add_argument("--app-id", default=os.getenv("GITHUB_APP_ID"))
+    parser.add_argument("--client-id", default=os.getenv("GITHUB_CLIENT_ID"),
+                        help="Client ID do GitHub App; preferido como emissor do JWT")
     parser.add_argument("--installation-id", default=os.getenv("GITHUB_INSTALLATION_ID"))
     parser.add_argument("--private-key", type=Path, default=os.getenv("GITHUB_PRIVATE_KEY_PATH"))
     parser.add_argument("--api-url", default=os.getenv("GITHUB_API_URL", "https://api.github.com"))
@@ -395,10 +458,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--include-archived", action="store_true")
     parser.add_argument("--no-retry-errors", action="store_true")
     parser.add_argument("--export-only", action="store_true")
+    parser.add_argument("--validate-only", action="store_true",
+                        help="valida App, instalação e endpoints sem iniciar a coleta")
     parser.add_argument("--log-level", default="INFO", choices=("DEBUG", "INFO", "WARNING", "ERROR"))
     args = parser.parse_args()
     if not args.export_only:
-        missing = [name for name in ("org", "app_id", "installation_id", "private_key") if not getattr(args, name)]
+        missing = [name for name in ("org", "private_key") if not getattr(args, name)]
+        if not (args.client_id or args.app_id):
+            missing.append("client_id ou app_id")
         if missing:
             parser.error("parâmetros obrigatórios ausentes: " + ", ".join(missing))
         if args.workers < 1:
@@ -421,8 +488,13 @@ def main() -> int:
         raise SystemExit(f"Checkpoint pertence à organização {previous_org!r}; use outro arquivo")
     state.set_meta("org", args.org)
     private_key = args.private_key.read_text(encoding="utf-8")
-    client = GitHubAppClient(args.app_id, args.installation_id, private_key,
+    client = GitHubAppClient(args.client_id or args.app_id, args.installation_id, private_key,
                              args.api_url, args.timeout, args.max_retries)
+    client.validate_and_resolve_installation(args.org)
+    if args.validate_only:
+        LOG.info("Validação concluída; nenhuma coleta foi iniciada")
+        state.close()
+        return 0
     if state.get_meta("repo_enumeration_complete") != "1":
         enumerate_repositories(client, state, args.org)
     pending = state.pending(args.include_archived, not args.no_retry_errors)

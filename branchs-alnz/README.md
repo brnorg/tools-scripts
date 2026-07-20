@@ -19,7 +19,7 @@ Crie/instale um GitHub App na organização com:
 - Repository access → **All repositories** (ou todos os repositórios que devem entrar no inventário)
 - Nenhum webhook é necessário.
 
-Anote o App ID e o Installation ID e gere uma chave privada PEM. A chave nunca deve ser versionada.
+Anote o Client ID (recomendado) ou App ID e gere uma chave privada PEM. O Installation ID é descoberto automaticamente pela organização; se ele for informado e estiver incorreto, o script usa o valor descoberto e emite um aviso. A chave nunca deve ser versionada.
 
 ## Instalação e execução
 
@@ -30,7 +30,8 @@ pip install -r requirements.txt
 
 $env:GITHUB_ORG = "minha-org"
 $env:GITHUB_APP_ID = "123456"
-$env:GITHUB_INSTALLATION_ID = "78901234"
+# Alternativa recomendada no GitHub.com: $env:GITHUB_CLIENT_ID = "Iv1..."
+# GITHUB_INSTALLATION_ID é opcional
 $env:GITHUB_PRIVATE_KEY_PATH = "C:\segredos\app.private-key.pem"
 
 python workflow_branch_inventory.py --workers 4
@@ -42,6 +43,22 @@ Arquivos gerados:
 - `workflow_branches.csv`: resultado final em UTF-8 com BOM, adequado para Excel.
 
 Ao reiniciar com os mesmos argumentos, repositórios concluídos são ignorados; itens interrompidos ou com erro são tentados novamente. O token de instalação, válido por uma hora, é renovado automaticamente. Ao atingir limite primário ou secundário, o processo respeita `Retry-After` ou `X-RateLimit-Reset` e continua depois da espera.
+
+Todas as chamadas ignoram a validação de certificado SSL, inclusive as chamadas de autenticação. Isso permite certificados self-signed, expirados ou assinados por uma CA corporativa não instalada, mas remove a proteção contra interceptação TLS.
+
+Antes da coleta, o script valida `GET /app`, descobre a instalação com `GET /orgs/{org}/installation`, cria o token com `POST /app/installations/{id}/access_tokens` e testa `GET /installation/repositories`. Erros incluem agora o status HTTP, a URL efetiva e a resposta do GitHub.
+
+No GitHub.com, use `https://api.github.com`. No GitHub Enterprise Server, use obrigatoriamente a base `https://HOSTNAME/api/v3`:
+
+```powershell
+$env:GITHUB_API_URL = "https://github.empresa.local/api/v3"
+```
+
+Para validar apenas autenticação, Installation ID e endpoints, sem iniciar a coleta:
+
+```powershell
+python workflow_branch_inventory.py --validate-only --log-level INFO
+```
 
 Para apenas reconstruir o CSV a partir do checkpoint:
 
