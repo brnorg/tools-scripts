@@ -60,6 +60,12 @@ Para validar apenas autenticação, Installation ID e endpoints, sem iniciar a c
 python workflow_branch_inventory.py --validate-only --log-level INFO
 ```
 
+Para validar apenas autenticação, Installation ID e endpoints, sem iniciar a coleta:
+
+```powershell
+python workflow_branch_inventory.py --validate-only --log-level INFO
+```
+
 Para apenas reconstruir o CSV a partir do checkpoint:
 
 ```powershell
@@ -79,6 +85,8 @@ Opções úteis:
 
 ## Colunas do CSV
 
-`repository`, `default_branch`, `workflow_path`, `workflow_name`, `event`, `filter_type`, `branch_pattern`, `parse_status`, `detail`.
+`repository`, `default_branch`, `workflow_path`, `usage_location`, `referenced_resource`, `version`.
 
-Se um YAML estiver inválido, ele é preservado no relatório com `parse_status=yaml_error`, em vez de interromper a coleta.
+Se um YAML estiver inválido, o erro é registrado no log e os demais arquivos continuam sendo processados.
+
+Ao abrir um checkpoint criado pela versão anterior, o script migra o banco automaticamente e marca os repositórios como pendentes para extrair novamente as informações corretas.
